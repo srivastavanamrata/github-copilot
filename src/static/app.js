@@ -4,6 +4,16 @@ document.addEventListener("DOMContentLoaded", () => {
   const signupForm = document.getElementById("signup-form");
   const messageDiv = document.getElementById("message");
 
+  // helper: simple HTML escape to avoid injecting raw strings
+  function escapeHtml(str) {
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
   // Function to fetch activities from API
   async function fetchActivities() {
     try {
@@ -12,6 +22,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
       // Clear loading message
       activitiesList.innerHTML = "";
+      activitySelect.innerHTML = `<option value="">-- Select an activity --</option>`;
 
       // Populate activities list
       Object.entries(activities).forEach(([name, details]) => {
@@ -20,11 +31,35 @@ document.addEventListener("DOMContentLoaded", () => {
 
         const spotsLeft = details.max_participants - details.participants.length;
 
+        // build participants HTML
+        let participantsHTML;
+        if (Array.isArray(details.participants) && details.participants.length > 0) {
+          participantsHTML = `<div class="participants">
+            <div class="participants-header">Participants (${details.participants.length})</div>
+            <ul class="participants-list">
+              ${details.participants
+                .map((p) => {
+                  const email = escapeHtml(p);
+                  const initial = escapeHtml((p && p[0]) ? p[0].toUpperCase() : "");
+                  return `<li data-activity="${escapeHtml(name)}" data-email="${email}">
+                    <span class="participant-badge">${initial}</span>
+                    <span class="participant-email">${email}</span>
+                    <span class="delete-participant" title="Unregister participant">✕</span>
+                  </li>`;
+                })
+                .join("")}
+            </ul>
+          </div>`;
+        } else {
+          participantsHTML = `<div class="participants"><p class="no-participants">No participants yet</p></div>`;
+        }
+
         activityCard.innerHTML = `
-          <h4>${name}</h4>
-          <p>${details.description}</p>
-          <p><strong>Schedule:</strong> ${details.schedule}</p>
+          <h4>${escapeHtml(name)}</h4>
+          <p>${escapeHtml(details.description || "")}</p>
+          <p><strong>Schedule:</strong> ${escapeHtml(details.schedule || "")}</p>
           <p><strong>Availability:</strong> ${spotsLeft} spots left</p>
+          ${participantsHTML}
         `;
 
         activitiesList.appendChild(activityCard);
@@ -62,6 +97,8 @@ document.addEventListener("DOMContentLoaded", () => {
         messageDiv.textContent = result.message;
         messageDiv.className = "success";
         signupForm.reset();
+        // Refresh activities to show updated participants
+        await fetchActivities();
       } else {
         messageDiv.textContent = result.detail || "An error occurred";
         messageDiv.className = "error";
@@ -78,6 +115,48 @@ document.addEventListener("DOMContentLoaded", () => {
       messageDiv.className = "error";
       messageDiv.classList.remove("hidden");
       console.error("Error signing up:", error);
+    }
+  });
+
+  // Handle unregistering participants
+  activitiesList.addEventListener('click', async (e) => {
+    if (e.target.classList.contains('delete-participant')) {
+      const li = e.target.closest('li');
+      const activity = li.dataset.activity;
+      const email = li.dataset.email;
+
+      try {
+        const response = await fetch(
+          `/activities/${encodeURIComponent(activity)}/unregister?email=${encodeURIComponent(email)}`,
+          {
+            method: "POST",
+          }
+        );
+
+        const result = await response.json();
+
+        if (response.ok) {
+          messageDiv.textContent = result.message;
+          messageDiv.className = 'success';
+          // Refresh activities to show updated participants
+          await fetchActivities();
+        } else {
+          messageDiv.textContent = result.detail || "An error occurred";
+          messageDiv.className = 'error';
+        }
+
+        messageDiv.classList.remove('hidden');
+
+        // Hide message after 5 seconds
+        setTimeout(() => {
+          messageDiv.classList.add('hidden');
+        }, 5000);
+      } catch (error) {
+        messageDiv.textContent = "Failed to unregister. Please try again.";
+        messageDiv.className = 'error';
+        messageDiv.classList.remove('hidden');
+        console.error("Error unregistering:", error);
+      }
     }
   });
 
